@@ -16,6 +16,7 @@ privox_debug.log
 build/
 dist/
 *.spec
+*.exe
 
 # VS Code
 .vscode/
