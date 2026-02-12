@@ -1,4 +1,4 @@
-# Privox (formerly Wispr Local)
+# Privox
 
 A powerful, private, and local voice input assistant for Windows. Privox captures your speech, transcribes it using **Faster-Whisper**, and refines the text using **Llama 3** for perfect grammar and formatting.
 
