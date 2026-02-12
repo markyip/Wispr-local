@@ -25,15 +25,28 @@ else:
         EXE_DIR = os.path.dirname(EXE_DIR)
     os.chdir(EXE_DIR)
 
-# Set up logging for bootstrap in the EXE_DIR
-# We use a unique name for setup to prevent it being overwritten by the app launch
-logging.basicConfig(
-    filename=os.path.join(EXE_DIR, 'privox_setup.log'),
-    filemode='a', # Use append so we can see multiple attempts if needed
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    force=True
-)
+# Set up logging for bootstrap
+# Default to console only unless PRIVOX_DEBUG=1 is set
+log_level = logging.INFO
+log_format = '%(asctime)s - %(levelname)s - %(message)s'
+
+if os.environ.get("PRIVOX_DEBUG") == "1":
+    logging.basicConfig(
+        filename=os.path.join(EXE_DIR, 'privox_setup.log'),
+        filemode='a',
+        format=log_format,
+        level=log_level,
+        force=True
+    )
+else:
+    # Console only logging - explicitly use StreamHandler to avoid any default file behavior
+    # and avoid redirect loops if sys.stdout/stderr are later redirected
+    logging.basicConfig(
+        format=log_format,
+        level=log_level,
+        force=True,
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
 
 # Redirect stdout/stderr to logging to avoid 'NoneType' has no attribute 'write' in --noconsole mode
 class LoggerWriter:
@@ -373,6 +386,12 @@ def install_app_files(log_callback=None):
             subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe", "/FI", f"PID ne {my_pid}"], 
                            creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
             
+            # Additional names just in case
+            subprocess.run(["taskkill", "/F", "/IM", "WisprLocal.exe", "/FI", f"PID ne {my_pid}"], 
+                           creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "WisprLocal_v2.exe", "/FI", f"PID ne {my_pid}"], 
+                           creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+            
             # 2. Kill Python processes running our script (more targeted)
             # We use wmic for targeted killing of python processes specifically running voice_input.py
             cmd = 'wmic process where "commandline like \'%voice_input.py%\'" get processid'
@@ -383,7 +402,10 @@ def install_app_files(log_callback=None):
                     try: subprocess.run(["taskkill", "/F", "/PID", pid], creationflags=subprocess.CREATE_NO_WINDOW)
                     except: pass
             
-            time.sleep(2.5) # Increased wait for processes to fully terminate
+            # Also try to kill any process that has our folder open (less reliable but worth a shot)
+            # Nothing built-in for this without third-party tools, so we rely on the loop below.
+            
+            time.sleep(2.0) # Wait for them to die
         except: pass
         
         if log_callback: log_callback(f"Copying to {target_dir}...")
@@ -461,40 +483,48 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
         # ALWAYS attempt to rename the folder on every install/update.
         # This is the ONLY way to guarantee no 'PermissionError (WinError 5)' from locked DLLs
         # because even if a process has a DLL open, you can usually rename the PARENT folder on Windows.
-        if log_callback: log_callback("Atomic update: Moving current libraries to .old...")
+        if log_callback: log_callback("Checking for locked libraries...")
         temp_cleanup = lib_dir + f".old_{int(time.time())}"
-        try:
-            os.rename(lib_dir, temp_cleanup)
-            os.makedirs(lib_dir)
-            # Try to delete the old one in a thread to keep UI moving
-            threading.Thread(target=lambda: shutil.rmtree(temp_cleanup, ignore_errors=True), daemon=True).start()
-        except Exception as e:
-            # If rename fails, the folder is locked - force delete it with a batch script
-            if log_callback: log_callback(f"Folder locked ({e}). Force deleting...")
-            
-            # Create a batch script to forcefully delete the folder
-            delete_script = f"""
-@echo off
-timeout /t 1 /nobreak >nul
-rd /s /q "{lib_dir}" 2>nul
-mkdir "{lib_dir}"
-exit
-"""
-            script_path = os.path.join(os.environ['TEMP'], f"delete_libs_{int(time.time())}.bat")
-            with open(script_path, "w") as f:
-                f.write(delete_script)
-            
-            # Run it and wait
-            subprocess.run(["cmd", "/c", script_path], creationflags=subprocess.CREATE_NO_WINDOW)
-            time.sleep(1.5)
-            
-            # Cleanup script
-            try: os.remove(script_path)
-            except: pass
-            
-            # Verify it worked
-            if not os.path.exists(lib_dir):
+        success = False
+        
+        # Try up to 3 times to clear the folder
+        for attempt in range(3):
+            try:
+                if not os.path.exists(lib_dir):
+                    success = True
+                    break
+                    
+                if log_callback: log_callback(f"Wiping existing libraries (Attempt {attempt+1})...")
+                os.rename(lib_dir, temp_cleanup)
                 os.makedirs(lib_dir)
+                # Try to delete the old one in a thread
+                threading.Thread(target=lambda: shutil.rmtree(temp_cleanup, ignore_errors=True), daemon=True).start()
+                success = True
+                break
+            except Exception as e:
+                if log_callback: log_callback(f"Folder locked: {e}. Retrying force delete...")
+                
+                # Force delete with batch
+                script_path = os.path.join(os.environ['TEMP'], f"delete_libs_{int(time.time())}.bat")
+                with open(script_path, "w") as f:
+                    # More aggressive rd /s /q
+                    f.write(f'@echo off\ntimeout /t 1 /nobreak >nul\nrd /s /q "{lib_dir}"\nexit\n')
+                
+                subprocess.run(["cmd", "/c", script_path], creationflags=subprocess.CREATE_NO_WINDOW)
+                time.sleep(2.0)
+                try: os.remove(script_path)
+                except: pass
+                
+                if not os.path.exists(lib_dir):
+                    os.makedirs(lib_dir)
+                    success = True
+                    break
+
+        if not success:
+            if log_callback: 
+                log_callback("FATAL ERROR: Could not clear library folder.")
+                log_callback("Please REBOOT your computer and try again.")
+            raise Exception("Installation blocked by locked files. Please reboot and retry.")
     else:
         os.makedirs(lib_dir)
 

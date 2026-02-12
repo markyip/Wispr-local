@@ -90,16 +90,18 @@ If you want a smaller executable (removing NVIDIA drivers) for non-GPU machines:
 
 Privox uses a `config.json` file for customization. When running as an `.exe`, placed this file in the **same directory** as `Privox.exe`.
 
-| Parameter           | Default              | Description                                                    |
-| :------------------ | :------------------- | :------------------------------------------------------------- |
-| `hotkey`            | `"f8"`               | Keys like `"f8"`, `"f10"`, or characters like `"space"`.       |
-| `sound_enabled`     | `true`               | Enables/disables start and stop beeps.                         |
-| `vram_timeout`      | `60`                 | Seconds of inactivity before AI models are unloaded from VRAM. |
-| `whisper_model`     | `"distil-medium.en"` | Faster-Whisper model size.                                     |
-| `grammar_repo`      | (Llama 3.2)          | HuggingFace repository for the formatting model.               |
-| `grammar_file`      | (GGUF)               | Specific GGUF file to use.                                     |
-| `dictation_prompt`  | `null`               | Custom system prompt for dictation. Use `{dict}` for hints.    |
-| `custom_dictionary` | `[...]`              | List of words to help the AI recognize specific names/terms.   |
+| Parameter            | Default              | Description                                                    |
+| :------------------- | :------------------- | :------------------------------------------------------------- |
+| `hotkey`             | `"f8"`               | Keys like `"f8"`, `"f10"`, or characters like `"space"`.       |
+| `sound_enabled`      | `true`               | Enables/disables start and stop beeps.                         |
+| `vram_timeout`       | `60`                 | Seconds of inactivity before AI models are unloaded from VRAM. |
+| `whisper_model`      | `"distil-medium.en"` | Faster-Whisper model size.                                     |
+| `auto_stop_enabled`  | `true`               | Automatically stop recording after silence.                    |
+| `silence_timeout_ms` | `10000`              | Milliseconds of silence before auto-stop.                      |
+| `grammar_repo`       | (Llama 3.2)          | HuggingFace repository for the formatting model.               |
+| `grammar_file`       | (GGUF)               | Specific GGUF file to use.                                     |
+| `dictation_prompt`   | `null`               | Custom system prompt for dictation. Use `{dict}` for hints.    |
+| `custom_dictionary`  | `[...]`              | List of words to help the AI recognize specific names/terms.   |
 
 > [!TIP]
 > You do not need to rebuild the app after changing `config.json`. Simply restart Privox to apply new settings.
@@ -113,12 +115,19 @@ Privox is designed to be resource-friendly.
 
 ## Troubleshooting
 
-- **Logs**: Check `privox_debug.log` for detailed error messages.
+- **Logs**: By default, Privox does not write logs to files to keep your directory clean. If you encounter issues, you can enable logging by setting the environment variable `PRIVOX_DEBUG=1` before running. This will generate `privox_app.log` (app) or `privox_setup.log` (installer).
 - **Audio Issues**: Use the "Reconnect Audio" tray option.
 - **GPU Not Used**: Ensure CUDA is installed and `torch.cuda.is_available()` returns True.
 
+## Known Issues
+
+- **Language Mixing**: Privox currently cannot effectively handle mixing multiple languages (e.g., English and Chinese) within the same sentence. It is optimized for one primary language at a time.
+
 ## Roadmap
 
-- [ ] **Multi-language Support**: Add support for non-English transcription (Cantonese, Mandarin, etc.) and translation features.
+- [x] **Multi-language Support**: Add support for non-English transcription (Cantonese, Mandarin, etc.) and translation features.
+- [ ] **Lightweight Models**: Explore smaller models for faster execution and reduced storage requirements.
+- [ ] **Simultaneous Multi-language Handling**: Investigate models that can effectively process multiple languages within the same sentence.
+- [ ] **Tone Selection**: Explore building or integrating models that offer multiple tone options (e.g., sarcastic, polite, friendly).
 - [ ] **Configuration GUI**: A standalone settings window to adjust hotkeys and models without editing `config.json`.
 - [ ] **Custom Style Presets**: Quick switching between "Formal", "Creative", and "Literal" transcription modes.

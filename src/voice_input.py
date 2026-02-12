@@ -14,14 +14,29 @@ if sys.platform == 'win32':
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
 
 # Configure logging
-logging.basicConfig(
-    filename='privox_app.log',
-    filemode='a',
-    format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    level=logging.INFO,
-    force=True
-)
+# Default to console only unless PRIVOX_DEBUG=1 is set
+log_level = logging.INFO
+log_format = '%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s'
+log_datefmt = '%Y-%m-%d %H:%M:%S'
+
+if os.environ.get("PRIVOX_DEBUG") == "1":
+    logging.basicConfig(
+        filename='privox_app.log',
+        filemode='a',
+        format=log_format,
+        datefmt=log_datefmt,
+        level=log_level,
+        force=True
+    )
+else:
+    # Console only logging - explicitly use StreamHandler to avoid any default file behavior
+    logging.basicConfig(
+        format=log_format,
+        datefmt=log_datefmt,
+        level=log_level,
+        force=True,
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
 
 # Silence noisy external loggers
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -283,7 +298,7 @@ class GrammarChecker:
                         "\n2. FIX CAPITALIZATION: Ensure the first letter of every sentence is capitalized."
                         "\n3. FIX PUNCTUATION: Ensure every sentence ends with appropriate punctuation (., ?, or !)."
                         "\n4. If the input is a question, correct the grammar of the question. Do NOT answer it."
-                        "\n5. If the input is a list, format it as a markdown bulleted list."
+                        "\n5. FORMATTING: Use paragraphs for natural speech or narrative. Use markdown bulleted lists ONLY when the content is clearly a series of distinct items, a list of steps, or a shopping list."
                         "\n6. Maintain the original meaning and language."
                         f"{dict_prompt}"
                     )
@@ -327,6 +342,8 @@ class VoiceInputApp:
         # Load Config
         self.hotkey = keyboard.Key.f8 # Default
         self.sound_enabled = True
+        self.auto_stop_enabled = True
+        self.silence_timeout_ms = 10000
         self.custom_dictionary = []
         self.dictation_prompt = None
         self.command_prompt = None
@@ -392,7 +409,7 @@ class VoiceInputApp:
             self.vad_iterator = self.VADIterator(self.vad_model, 
                                                  threshold=VAD_THRESHOLD, 
                                                  sampling_rate=SAMPLE_RATE, 
-                                                 min_silence_duration_ms=SILENCE_DURATION_MS, 
+                                                 min_silence_duration_ms=self.silence_timeout_ms, 
                                                  speech_pad_ms=SPEECH_PAD_MS)
             log_print("Done.")
         except Exception as e:
@@ -516,6 +533,8 @@ class VoiceInputApp:
                     config = json.load(f)
                     hotkey_str = config.get("hotkey", "f8").lower()
                     self.sound_enabled = config.get("sound_enabled", True)
+                    self.auto_stop_enabled = config.get("auto_stop_enabled", True)
+                    self.silence_timeout_ms = config.get("silence_timeout_ms", 10000)
                     self.custom_dictionary = config.get("custom_dictionary", [])
                     self.vram_timeout = config.get("vram_timeout", 60)
                     self.dictation_prompt = config.get("dictation_prompt", None)
@@ -912,8 +931,12 @@ class VoiceInputApp:
                 if self.vad_iterator:
                     chunk_tensor = torch.from_numpy(chunk).float()
                     speech_dict = self.vad_iterator(chunk_tensor, return_seconds=True)
-                    if speech_dict and 'start' in speech_dict and not self.is_speaking:
-                         self.is_speaking = True
+                    if speech_dict:
+                        if 'start' in speech_dict and not self.is_speaking:
+                             self.is_speaking = True
+                        if 'end' in speech_dict and self.is_listening and self.auto_stop_enabled:
+                             log_print(" [Auto-Stop Detected]")
+                             self.stop_listening()
                             
             except Exception as e:
                 log_print(f"Loop Error: {e}")

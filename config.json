@@ -6,10 +6,7 @@
   "grammar_repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
   "grammar_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
   "dictation_prompt": null,
-  "custom_dictionary": [
-    "Privox",
-    "SenseVoice",
-    "Phi-4",
-    "Silero"
-  ]
+  "auto_stop_enabled": true,
+  "silence_timeout_ms": 10000,
+  "custom_dictionary": ["Privox", "SenseVoice", "Phi-4", "Silero"]
 }
