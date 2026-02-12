@@ -27,6 +27,15 @@ def log_print(msg, **kwargs):
     logging.info(msg)
     print(msg, **kwargs)
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 log_print("Starting Wispr Voice Input (English Edition)...")
 
 try:
@@ -63,7 +72,9 @@ try:
     log_print("All imports successful.")
 except Exception as e:
     log_print(f"CRITICAL IMPORT ERROR: {e}")
-    input("Press Enter to exit...")
+    if sys.platform == 'win32':
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, f"Critical Initialization Error:\n\n{e}", "Wispr Local Error", 0x10)
     sys.exit(1)
 
 # --- Configuration ---
@@ -107,7 +118,12 @@ class GrammarChecker:
         self.loading_error = None
         self.dictation_prompt = dictation_prompt
         self.command_prompt = command_prompt
-        
+        self.icon = None # Placeholder
+
+    def load_model(self):
+        if self.model:
+            return
+
         # 1. Check Local "models" folder (Offline Mode)
         local_model_path = os.path.join(os.getcwd(), "models", GRAMMAR_FILE)
         if os.path.exists(local_model_path):
@@ -393,6 +409,17 @@ class VoiceInputApp:
             log_print(f"Error loading config: {e}. Using default.")
 
     def create_icon(self, color):
+        icon_path = resource_path("assets/icon.png")
+        if os.path.exists(icon_path):
+            try:
+                base_image = Image.open(icon_path)
+                # If we want to add a status overlay, we can do it here
+                # For now, let's just return the image or a colored variant
+                return base_image
+            except Exception as e:
+                log_print(f"Error loading icon file: {e}")
+
+        # Fallback to dynamic drawing if file not found
         width = 64
         height = 64
         image = Image.new('RGB', (width, height), (0, 0, 0))
@@ -680,7 +707,7 @@ class VoiceInputApp:
         image = self.create_icon("cyan")
         self.icon = pystray.Icon("Wispr Voice Input", image, "Wispr: Initializing...", menu)
         
-        # Pass icon to grammar checker for notifications
+        # Pass icon to grammar checker for notifications immediately
         self.grammar_checker.icon = self.icon
 
         print("System Tray started. Check your taskbar.")
