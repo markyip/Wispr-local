@@ -549,8 +549,12 @@ exit
         gui_instance.active_process = process
         
         count = 0
+        install_success = False
         for line in process.stdout:
             if log_callback: log_callback(f"PIP: {line.strip()}")
+            # Check if packages were actually installed (even if cleanup fails later)
+            if "Successfully installed" in line and "torch" in line:
+                install_success = True
             count += 1
             if count % 10 == 0:
                 current = gui_instance.progress_val.get()
@@ -560,9 +564,12 @@ exit
         process.wait()
         gui_instance.active_process = None
         
-        if process.returncode != 0:
+        # Accept success if packages were installed, even if pip's cleanup failed
+        if not install_success and process.returncode != 0:
             if log_callback: log_callback("ERROR: PyTorch GPU installation failed!")
             return False
+        elif install_success and process.returncode != 0:
+            if log_callback: log_callback("Note: Packages installed successfully, ignoring cleanup error.")
         
         # Now install remaining packages from PyPI + llama-cpp from CUDA wheel
         remaining_packages = [
