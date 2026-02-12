@@ -469,8 +469,32 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
             # Try to delete the old one in a thread to keep UI moving
             threading.Thread(target=lambda: shutil.rmtree(temp_cleanup, ignore_errors=True), daemon=True).start()
         except Exception as e:
-            # If rename fails (rare if we killed processes correctly), we proceed anyway
-            if log_callback: log_callback(f"Note: Folder rename skipped ({e}). Proceeding carefully...")
+            # If rename fails, the folder is locked - force delete it with a batch script
+            if log_callback: log_callback(f"Folder locked ({e}). Force deleting...")
+            
+            # Create a batch script to forcefully delete the folder
+            delete_script = f"""
+@echo off
+timeout /t 1 /nobreak >nul
+rd /s /q "{lib_dir}" 2>nul
+mkdir "{lib_dir}"
+exit
+"""
+            script_path = os.path.join(os.environ['TEMP'], f"delete_libs_{int(time.time())}.bat")
+            with open(script_path, "w") as f:
+                f.write(delete_script)
+            
+            # Run it and wait
+            subprocess.run(["cmd", "/c", script_path], creationflags=subprocess.CREATE_NO_WINDOW)
+            time.sleep(1.5)
+            
+            # Cleanup script
+            try: os.remove(script_path)
+            except: pass
+            
+            # Verify it worked
+            if not os.path.exists(lib_dir):
+                os.makedirs(lib_dir)
     else:
         os.makedirs(lib_dir)
 
