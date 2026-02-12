@@ -21,17 +21,27 @@ PyInstaller.__main__.run([
     '--hidden-import=pystray',
     '--hidden-import=pynput',
     '--hidden-import=faster_whisper',
-    '--hidden-import=scikit-learn',
-    '--hidden-import=sklearn.utils._cython_blas',
-    '--hidden-import=sklearn.neighbors.typedefs',
-    '--hidden-import=sklearn.neighbors.quad_tree',
-    '--hidden-import=sklearn.tree',
-    '--hidden-import=sklearn.tree._utils',
-    '--hidden-import=scipy.spatial.transform._rotation_groups',
-    '--hidden-import=scipy.special.cython_special',
     '--hidden-import=llama_cpp',
-    # Collect data for faster-whisper (if needed, though it usually downloads to cache)
-    # We might need to ensure the VAD model is handled if it's not in cache, but the app handles download.
+    '--hidden-import=torch',
+    '--hidden-import=markupsafe',
+    '--hidden-import=torchaudio',
+    # Metadata and all data collection for complex libraries
+    '--collect-all=llama_cpp',
+    '--collect-all=faster_whisper',
+    '--collect-all=pystray',
+    '--copy-metadata=markupsafe',
+    '--copy-metadata=torch',
+    '--copy-metadata=tqdm',
+    '--copy-metadata=regex',
+    '--copy-metadata=requests',
+    '--copy-metadata=packaging',
+    # Exclude problematic large libraries that aren't used to keep the exe smaller
+    '--exclude-module=transformers', 
+    '--exclude-module=matplotlib',
+    '--exclude-module=notebook',
+    '--exclude-module=jedi',
+    # Optimization: ignore irrelevant data
+    '--collect-submodules=pynput',
 ])
 
 print("Build Complete. Executable is in 'dist/WisprLocal.exe'")
