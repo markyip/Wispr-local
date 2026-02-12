@@ -29,7 +29,6 @@ PyInstaller.__main__.run([
     '--hidden-import=numpy',
     '--hidden-import=numpy._core',
     '--hidden-import=numpy._core._exceptions',
-    '--hidden-import=olefile',
     # Metadata and all data collection for complex libraries
     '--collect-all=llama_cpp',
     '--collect-all=faster_whisper',
@@ -41,12 +40,11 @@ PyInstaller.__main__.run([
     '--copy-metadata=torch',
     '--copy-metadata=numpy',
     '--copy-metadata=tqdm',
-    '--copy-metadata=olefile',
     '--copy-metadata=regex',
     '--copy-metadata=requests',
     '--copy-metadata=packaging',
     # Exclude problematic large libraries that aren't used to keep the exe smaller
-    '--exclude-module=transformers', 
+    '--exclude-module=transformers',
     '--exclude-module=matplotlib',
     '--exclude-module=notebook',
     '--exclude-module=jedi',
