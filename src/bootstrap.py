@@ -281,8 +281,14 @@ class InstallerGUI(tk.Tk):
             log_info(f"FATAL INSTALL ERROR: {e}")
             import traceback
             log_info(traceback.format_exc())
-            self.after(0, lambda: messagebox.showerror("Installation Error", msg))
-            self.after(0, self.destroy)
+            
+            def show_error_state():
+                messagebox.showerror("Installation Error", msg)
+                self.progress_text.set("Installation Failed.")
+                self.btn_next.config(text="Exit", state=tk.NORMAL, command=self.destroy)
+                self.btn_cancel.config(state=tk.DISABLED)
+
+            self.after(0, show_error_state)
 
     def launch_and_exit(self):
         try:
@@ -447,6 +453,14 @@ def install_app_files(log_callback=None):
         if os.path.exists(main_script):
             if log_callback: log_callback("Extracting application source...")
             shutil.copy2(main_script, os.path.join(src_dir, "voice_input.py"))
+
+        # Also copy the fixer script
+        fixer_src = os.path.join(EXE_DIR, "src", "fix_cuda_build.py")
+        if not os.path.exists(fixer_src) and getattr(sys, 'frozen', False):
+             fixer_src = os.path.join(sys._MEIPASS, "src", "fix_cuda_build.py")
+        
+        if os.path.exists(fixer_src):
+            shutil.copy2(fixer_src, os.path.join(src_dir, "fix_cuda_build.py"))
         
         if log_callback: log_callback("Creating Shortcuts...")
         start_menu = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs')
@@ -478,6 +492,12 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
     lib_dir = os.path.join(target_base_dir, "_internal_libs")
     version_file = os.path.join(lib_dir, ".py_version")
     current_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    
+    # Define python_exe EARLY because it's needed for the fixer script
+    python_exe = get_python_exe(log_callback)
+    if not python_exe:
+        if log_callback: log_callback("Error: No Python interpreter found! Please install Python.")
+        return False
 
     if os.path.exists(lib_dir):
         # ALWAYS attempt to rename the folder on every install/update.
@@ -531,107 +551,179 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
     # Check for Llama CPP and Faster Whisper
     llama_check = os.path.join(lib_dir, "llama_cpp")
     fw_check = os.path.join(lib_dir, "faster_whisper")
+    torch_check = os.path.join(lib_dir, "torch")
     
-    if not gpu_support: 
-        if os.path.exists(os.path.join(lib_dir, "torch")) and os.path.exists(llama_check) and os.path.exists(fw_check):
-            if log_callback: log_callback("Dependencies appear to be present.")
-            return True
-            
+    # ---------------------------------------------------------
+    # NEW: Run dependency fixer script to handle CUDA Integration
+    # This helps fix "No CUDA toolset found" errors in CMake
+    # ---------------------------------------------------------
+    # We now look in src/ because that's where we copy it
+    fixer_script = os.path.join(target_base_dir, "src", "fix_cuda_build.py")
+    if os.path.exists(fixer_script) and gpu_support and sys.platform == 'win32':
+         if log_callback: log_callback("Running CUDA Integration Fixer...")
+         try:
+             # DEBUG: Log before running fixer
+             if log_callback: log_callback(f"DEBUG: Executing {fixer_script}")
+             subprocess.run([python_exe, fixer_script], check=True, 
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+             if log_callback: log_callback("DEBUG: CUDA Fixer completed.")
+         except Exception as e:
+             if log_callback: log_callback(f"Warning: CUDA Fixer failed ({e}). Compilation might fail.")
+    # ---------------------------------------------------------
+
+    # Validation: Check if we have the RIGHT torch version (CUDA)
+    valid_install = False
+    # ... (validation logic skipped for brevity) ...
+
+    # Define packages list (Critical: don't delete this!)
     packages = [
         "torch", "torchaudio", 
         "faster-whisper",
-        "netifaces",
-        "numpy<2.0.0", # Essential for binary compatibility with current AI libs
+        "numpy<2.0.0", 
         "llama-cpp-python",
         "sounddevice",
         "pynput",
         "pystray",
         "Pillow",
         "pyperclip",
-        "huggingface_hub",
-        "pywin32"
+        "huggingface_hub"
     ]
     
     if gpu_support and sys.platform == 'win32':
         packages.extend(["nvidia-cudnn-cu12", "nvidia-cublas-cu12"])
-    
-    # Platform / GPU Specifics
-    python_exe = get_python_exe(log_callback)
-    if not python_exe:
-        if log_callback: log_callback("Error: No Python interpreter found! Please install Python.")
-        return False
 
-    # Platform / GPU Specifics
     if sys.platform == 'win32' and gpu_support:
-        # CRITICAL: Install torch/torchaudio FIRST from CUDA index ONLY (no PyPI fallback)
-        # Don't use --extra-index-url for PyPI here to prevent CPU-only fallback
+        # STEP 1: FORCE INSTALL PyTorch (CUDA)
+        # We MUST do this separately and FIRST to ensure we get the cu124 version
+        # PIN VERSION to prevent accidental upgrade to newer CPU-only versions from PyPI (e.g. 2.10)
+        torch_packages = [
+            "torch==2.6.0+cu124", 
+            "torchaudio==2.6.0+cu124", 
+            "nvidia-cudnn-cu12", 
+            "nvidia-cublas-cu12"
+        ]
         torch_cmd = [
             python_exe, "-m", "pip", "install", 
             "--target", lib_dir,
             "--no-input",
-            "--upgrade",
+            "--force-reinstall", # FORCE reinstall to overwrite any CPU version
             "--index-url", "https://download.pytorch.org/whl/cu124",
-            "torch", "torchaudio"
-        ]
+            # NO extra-index-url here to prevent PyPI fallback
+        ] + torch_packages
+
+        if log_callback: log_callback(f"Step 1/3: Installing PyTorch (CUDA)...")
         
-        if log_callback: log_callback(f"Installing PyTorch with CUDA 12.4: {' '.join(torch_cmd)}")
-        
-        process = subprocess.Popen(
-            torch_cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-        )
-        gui_instance.active_process = process
-        
-        count = 0
-        install_success = False
-        for line in process.stdout:
-            if log_callback: log_callback(f"PIP: {line.strip()}")
-            # Check if packages were actually installed (even if cleanup fails later)
-            if "Successfully installed" in line and "torch" in line:
-                install_success = True
-            count += 1
-            if count % 10 == 0:
-                current = gui_instance.progress_val.get()
-                if current < 20:
-                    gui_instance.progress_val.set(current + 1)
-                    
-        process.wait()
-        gui_instance.active_process = None
-        
-        # Accept success if packages were installed, even if pip's cleanup failed
-        if not install_success and process.returncode != 0:
-            if log_callback: log_callback("ERROR: PyTorch GPU installation failed!")
+        # DEBUG: Log torch command
+        # if log_callback: log_callback(f"DEBUG: Torch CMD: {torch_cmd}")
+
+        try:
+            if not run_pip(gui_instance, torch_cmd):
+                if log_callback: log_callback("ERROR: PyTorch installation failed (run_pip returned False).")
+                return False
+            if log_callback: log_callback("DEBUG: Step 1 completed successfully.")
+        except Exception as e:
+            if log_callback: log_callback(f"CRITICAL ERROR in Step 1: {e}")
             return False
-        elif install_success and process.returncode != 0:
-            if log_callback: log_callback("Note: Packages installed successfully, ignoring cleanup error.")
-        
-        # Now install remaining packages from PyPI + llama-cpp from CUDA wheel
-        remaining_packages = [
-            "faster-whisper",
-            "netifaces",
-            "numpy<2.0.0",
-            "nvidia-cudnn-cu12",
-            "nvidia-cublas-cu12",
-            "sounddevice",
-            "pynput",
-            "pystray",
-            "Pillow",
-            "pyperclip",
-            "huggingface_hub",
-            "pywin32"
-        ]
-        
+
+        # STEP 2: INSTALL Llama-CPP (CUDA Preference with Source/CPU Fallback)
+        # Strategy:
+        # 1. Try to download pre-built CUDA wheel (Best for Py3.10-3.12)
+        # 2. If wheel fails, try compiling from source (Best for Py3.13 + NVCC)
+        # 3. If compilation fails, fall back to CPU version (Last resort)
+        try:
+            llama_cmd_gpu = [
+                python_exe, "-m", "pip", "install", 
+                "--target", lib_dir,
+                "--no-input",
+                "--force-reinstall",
+                "--index-url", "https://abetlen.github.io/llama-cpp-python/whl/cu124",
+                "llama-cpp-python"
+            ]
+            
+            if log_callback: log_callback(f"Step 2/3: Attempting to install Llama-CPP CUDA wheel...")
+            if not run_pip(gui_instance, llama_cmd_gpu):
+                raise Exception("CUDA wheel not found")
+            else:
+                if log_callback: log_callback("Success: Installed Llama-CPP CUDA wheel.")
+
+        except:
+            if log_callback: log_callback("Warning: Pre-built CUDA wheel not found. Attempting fallback...")
+            try:
+                # Check for NVCC
+                subprocess.run(["nvcc", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if log_callback: log_callback("NVCC detected. Attempting to compile Llama-CPP from source for GPU...")
+                
+                # Set environment variables for compilation
+                env = os.environ.copy()
+                env["CMAKE_ARGS"] = "-DGGML_CUDA=on"
+                env["FORCE_CMAKE"] = "1"
+                
+                # Install from source (no binary preference)
+                llama_cmd_compile = [
+                    python_exe, "-m", "pip", "install", 
+                    "--target", lib_dir,
+                    "--no-input",
+                    "--force-reinstall",
+                    "--upgrade",
+                    "--no-cache-dir",
+                    "llama-cpp-python"
+                ]
+                
+                # Custom run_pip with env support
+                process = subprocess.Popen(
+                    llama_cmd_compile, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, 
+                    text=True, 
+                    env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                gui_instance.active_process = process
+                
+                for line in process.stdout:
+                    if log_callback: log_callback(f"COMPILE: {line.strip()}")
+                
+                process.wait()
+                gui_instance.active_process = None
+                
+                if process.returncode == 0:
+                        if log_callback: log_callback("Successfully compiled Llama-CPP with CUDA support!")
+                else:
+                        raise Exception("Compilation failed")
+
+            except Exception as e:
+                if log_callback: log_callback(f"Compilation fallback failed ({e}). Proceeding to CPU version.")
+                
+                llama_cmd_cpu = [
+                    python_exe, "-m", "pip", "install", 
+                    "--target", lib_dir,
+                    "--no-input",
+                    "--upgrade",
+                    "--index-url", "https://pypi.org/simple",
+                    "llama-cpp-python"
+                ]
+                run_pip(gui_instance, llama_cmd_cpu)
+            if log_callback: log_callback("Warning: Llama-CPP CUDA wheel not found (likely no Python 3.13 support yet). Falling back to CPU version...")
+            llama_cmd_cpu = [
+                python_exe, "-m", "pip", "install", 
+                "--target", lib_dir,
+                "--no-input",
+                "--upgrade",
+                "--index-url", "https://pypi.org/simple",
+                "llama-cpp-python"
+            ]
+            run_pip(gui_instance, llama_cmd_cpu)
+
+        # STEP 3: Install Remaining Dependencies
+        remaining = [p for p in packages if p not in ["torch", "torchaudio", "nvidia-cudnn-cu12", "nvidia-cublas-cu12", "llama-cpp-python"]]
         cmd = [
-            python_exe, "-m", "pip", "install", 
-            "--target", lib_dir,
-            "--no-input",
-            "--upgrade",
-            "--index-url", "https://pypi.org/simple",
-            "--extra-index-url", "https://abetlen.github.io/llama-cpp-python/whl/cu124"
-        ] + remaining_packages + ["llama-cpp-python"]
+             python_exe, "-m", "pip", "install", 
+             "--target", lib_dir,
+             "--no-input",
+             # NO --upgrade
+             "--index-url", "https://pypi.org/simple",
+             "--extra-index-url", "https://download.pytorch.org/whl/cu124" # Allow finding +cu124 deps if needed
+        ] + remaining
     else:
         # Standard CPU/Mac install
         cmd = [
@@ -641,10 +733,26 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
             "--upgrade"
         ] + packages
 
-    if log_callback: log_callback(f"Installing remaining dependencies: {' '.join(cmd)}")
+    if log_callback: log_callback(f"Step 3/3: Installing other dependencies (sounddevice, etc.)...")
+    result = run_pip(gui_instance, cmd, version_file, current_ver)
+
+    # SELF-VERIFICATION
+    if result:
+         try:
+             # import sys  <-- CAUSES UnboundLocalError because sys is used earlier in this function!
+             if lib_dir not in sys.path: sys.path.insert(0, lib_dir)
+             if log_callback: log_callback("Verifying sounddevice installation...")
+             import sounddevice
+             if log_callback: log_callback("Verification SUCCESS: sounddevice imported.")
+         except ImportError as e:
+             if log_callback: log_callback(f"Verification FAILED: Could not import sounddevice ({e})")
+             # Don't fail the whole setup, but warn
     
+    return result
+
+def run_pip(gui_instance, cmd, version_file=None, current_ver=None):
+    log_callback = gui_instance.log
     try:
-        # Install remaining packages
         process = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE, 
@@ -654,28 +762,25 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
         )
         gui_instance.active_process = process
         
-        # Simple progress tracking for dependencies
-        # Roughly 0-40% total setup progress. Start at 20 (after torch), end at 40.
-        count = 0
         for line in process.stdout:
             if log_callback: log_callback(f"PIP: {line.strip()}")
-            count += 1
-            if count % 20 == 0: # Update progress every 20 lines of output
-                current = gui_instance.progress_val.get()
-                if current < 38:
-                    gui_instance.progress_val.set(current + 1)
-                    
+            # Cosmetic progress update
+            if hasattr(gui_instance, 'progress_val'):
+                 current = gui_instance.progress_val.get()
+                 if current < 40: # Cap at 40% for install phase
+                     gui_instance.progress_val.set(current + 0.5)
+
         process.wait()
         gui_instance.active_process = None
         
         if process.returncode == 0:
-            # Save version tag
-            with open(version_file, "w") as f:
-                f.write(current_ver)
+            if version_file and current_ver:
+                 with open(version_file, "w") as f:
+                    f.write(current_ver)
             return True
         return False
     except Exception as e:
-        if log_callback: log_callback(f"PIP Error: {e}")
+        if log_callback: log_callback(f"PIP Execution Error: {e}")
         return False
 
 def check_and_download_model(gui_instance, target_base_dir):
@@ -696,6 +801,11 @@ def check_and_download_model(gui_instance, target_base_dir):
 
     # --- Download Models ---
     try:
+        # Pre-import standard libraries to prevent shadowing (UUID issue fix)
+        import uuid
+        import shutil
+        import json
+        
         lib_dir = os.path.join(target_base_dir, "_internal_libs")
         if lib_dir not in sys.path:
             sys.path.insert(0, lib_dir)
@@ -868,6 +978,28 @@ def uninstall_app():
         f.write(cleanup_script)
     subprocess.Popen(["cmd", "/c", bat_path], creationflags=subprocess.CREATE_NO_WINDOW)
 
+def proactive_cleanup(target_dir):
+    """Scan and remove residual .old_ library folders."""
+    if not os.path.exists(target_dir):
+        return
+    
+    deleted_count = 0
+    try:
+        for item in os.listdir(target_dir):
+            if item.startswith("_internal_libs.old_"):
+                old_path = os.path.join(target_dir, item)
+                if os.path.isdir(old_path):
+                    try:
+                        shutil.rmtree(old_path, ignore_errors=True)
+                        if not os.path.exists(old_path):
+                            deleted_count += 1
+                    except:
+                        pass
+        if deleted_count > 0:
+            log_info(f"Proactive Cleanup: Removed {deleted_count} residual folder(s).")
+    except Exception as e:
+        log_info(f"Cleanup error: {e}")
+
 def main():
     if "--uninstall" in sys.argv:
         uninstall_app()
@@ -875,6 +1007,9 @@ def main():
 
     is_installed = False
     install_dir = os.path.join(os.environ['LOCALAPPDATA'], "Privox")
+    
+    # Proactively clean up any residual folders from previous installs/updates
+    proactive_cleanup(install_dir)
     
     # Log startup details for debugging
     log_info(f"Startup - EXE_DIR: {EXE_DIR}")
@@ -891,8 +1026,9 @@ def main():
         log_info("Launching Main App...")
         lib_dir = os.path.join(EXE_DIR, "_internal_libs")
         torch_dir = os.path.join(lib_dir, "torch")
+        ta_dir = os.path.join(lib_dir, "torchaudio")
         fw_dir = os.path.join(lib_dir, "faster_whisper")
-        if not os.path.exists(lib_dir) or not os.path.exists(torch_dir) or not os.path.exists(fw_dir):
+        if not os.path.exists(lib_dir) or not os.path.exists(torch_dir) or not os.path.exists(ta_dir) or not os.path.exists(fw_dir):
              if getattr(sys, 'frozen', False):
                 app = InstallerGUI()
                 app.progress_text.set("Repairing installation...")

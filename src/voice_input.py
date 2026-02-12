@@ -100,8 +100,22 @@ except Exception as e:
     print(f"Boot Error: {e}")
 
 # Base Directory for models/libs
+# CRITICAL FIX: When running as frozen EXE, sys.executable is in the install dir,
+# but bootstrap might have placed libs in %LOCALAPPDATA% if we are running from there.
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
+    # Check 1: Is _internal_libs next to the EXE? (Portable mode)
+    exe_dir = os.path.dirname(sys.executable)
+    local_lib = os.path.join(exe_dir, "_internal_libs")
+    
+    # Only use local lib if it exists AND HAS CONTENT
+    if os.path.exists(local_lib) and os.listdir(local_lib):
+        BASE_DIR = exe_dir
+        log_print(f"DEBUG: Using Portable Libs at {local_lib}")
+    else:
+        # Check 2: Default Install Location (%LOCALAPPDATA%/Privox)
+        # This is where bootstrap.py installs things.
+        BASE_DIR = os.path.join(os.environ["LOCALAPPDATA"], "Privox")
+        log_print(f"DEBUG: Using AppData Libs at {BASE_DIR}")
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     if BASE_DIR.endswith('src'):
@@ -109,6 +123,7 @@ else:
 
 # Path Isolation: Ensure we only use the libraries we installed
 lib_dir = os.path.join(BASE_DIR, "_internal_libs")
+log_print(f"Resolved Library Directory: {lib_dir}")
 if os.path.exists(lib_dir):
     # CRITICAL: Disable user site-packages to prevent global packages from overriding our GPU libs
     import site
@@ -140,6 +155,17 @@ if os.path.exists(lib_dir):
 
 try:
     log_print("Importing core utilities...")
+    log_print(f"DEBUG: sys.path is: {sys.path}")
+    if os.path.exists(lib_dir):
+        try:
+             contents = os.listdir(lib_dir)
+             sd_found = 'sounddevice' in contents or any(x.startswith('sounddevice') for x in contents)
+             log_print(f"DEBUG: _internal_libs exists. items={len(contents)}. sounddevice_found={sd_found}")
+        except Exception as e:
+             log_print(f"DEBUG: Error listing lib_dir: {e}")
+    else:
+        log_print(f"DEBUG: _internal_libs NOT FOUND at {lib_dir}")
+
     import sounddevice as sd
     import numpy as np
     from pynput import keyboard
@@ -150,6 +176,20 @@ try:
     
     # Global Torch Import (Essential for multi-threaded access)
     import torch
+    
+    log_print(f"--- TORCH DIAGNOSTICS ---")
+    log_print(f"Torch Version: {torch.__version__}")
+    log_print(f"CUDA Available: {torch.cuda.is_available()}")
+    log_print(f"CUDA Version: {torch.version.cuda}")
+    log_print(f"CuDNN Version: {torch.backends.cudnn.version()}")
+    if torch.cuda.is_available():
+        log_print(f"Current Device: {torch.cuda.get_device_name(0)}")
+    else:
+        log_print("CUDA NOT AVAILABLE. Possible reasons:")
+        log_print("1. CPU version of Torch installed (check version above)")
+        log_print("2. Missing CUDA DLLs in PATH")
+        log_print("3. GPU driver issues")
+    log_print(f"-------------------------")
     
     # Windows Sound
     try:
@@ -553,8 +593,11 @@ class VoiceInputApp:
                         if not os.path.exists(model_path):
                             log_print(f"WARNING: Configured model '{WHISPER_SIZE}' not found at {model_path}. Transcription may fail.")
                     
-                    if hotkey_str in keyboard.Key.__members__:
-                        self.hotkey = keyboard.Key[hotkey_str]
+                    hotkey_lookup = hotkey_str.lower()
+                    if hotkey_lookup in keyboard.Key.__members__:
+                        self.hotkey = keyboard.Key[hotkey_lookup]
+                    elif hotkey_str.upper() in keyboard.Key.__members__:
+                        self.hotkey = keyboard.Key[hotkey_str.upper()]
                     else:
                         self.hotkey = keyboard.KeyCode.from_char(hotkey_str)
                     
@@ -568,7 +611,8 @@ class VoiceInputApp:
 
     def update_tray_tooltip(self):
         if self.icon:
-            self.icon.title = f"Privox: {self.loading_status}"
+            gpu_status = "GPU" if torch.cuda.is_available() else "CPU"
+            self.icon.title = f"Privox: {self.loading_status} ({gpu_status})"
 
     def update_status(self, status):
         # status: READY, RECORDING, PROCESSING, ERROR, LOADING, SLEEP
@@ -770,7 +814,8 @@ class VoiceInputApp:
         
         if len(self.audio_buffer) > 0:
             audio_segment = np.array(self.audio_buffer)
-            self.transcribe(audio_segment)
+            # Run transcription in a separate thread so we don't block the keyboard listener!
+            threading.Thread(target=self.transcribe, args=(audio_segment,), daemon=True).start()
         else:
              self.update_status("READY")
              
