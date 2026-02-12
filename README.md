@@ -122,6 +122,7 @@ Privox is designed to be resource-friendly.
 ## Known Issues
 
 - **Language Mixing**: Privox currently cannot effectively handle mixing multiple languages (e.g., English and Chinese) within the same sentence. It is optimized for one primary language at a time.
+- **Formatting Predictability**: While we've introduced flexible formatting (paragraphs vs. bullet points), the model's decision is not always perfectly controllable or predictable with current prompts. We are experimenting with better system instructions to improve consistency.
 
 ## Roadmap
 
@@ -130,4 +131,3 @@ Privox is designed to be resource-friendly.
 - [ ] **Simultaneous Multi-language Handling**: Investigate models that can effectively process multiple languages within the same sentence.
 - [ ] **Tone Selection**: Explore building or integrating models that offer multiple tone options (e.g., sarcastic, polite, friendly).
 - [ ] **Configuration GUI**: A standalone settings window to adjust hotkeys and models without editing `config.json`.
-- [ ] **Custom Style Presets**: Quick switching between "Formal", "Creative", and "Literal" transcription modes.
