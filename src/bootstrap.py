@@ -10,6 +10,8 @@ import queue
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import winreg
+import ctypes
+from ctypes import wintypes
 
 # Disable Symlinks for Windows (Fixes WinError 1314)
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
@@ -319,6 +321,29 @@ class InstallerGUI(tk.Tk):
             sys.exit(0)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch: {e}")
+
+# --- Mutex for Single Instance ---
+def is_app_running():
+    """ 
+    Checks if another instance is already running using a named Mutex.
+    Returns the handle if acquired, or None if another instance is detected.
+    """
+    if sys.platform != 'win32': return None
+    
+    # Use a unique name for the mutex
+    mutex_name = "Global\\Privox_SingleInstance_Mutex"
+    
+    # Create the mutex
+    handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = ctypes.windll.kernel32.GetLastError()
+    
+    # ERROR_ALREADY_EXISTS = 183
+    if last_error == 183:
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        return None
+        
+    return handle
 
 # --- Helper Functions ---
 
@@ -801,13 +826,13 @@ def install_dependencies(gui_instance, target_base_dir, gpu_support):
 
     skip_wipe = False
     if os.path.exists(lib_dir):
-        # Check if key libraries exist to determine if we can skip wiping
-        has_torch = os.path.exists(os.path.join(lib_dir, "torch"))
-        has_llama = os.path.exists(os.path.join(lib_dir, "llama_cpp"))
-        has_whisper = os.path.exists(os.path.join(lib_dir, "faster_whisper"))
+        # Improved detection: If we have ANY of the major heavy hitters, keep the directory.
+        # This prevents redownloading 2GB+ of torch/cuda if only a small utility is missing.
+        major_libs = ["torch", "nvidia", "llama_cpp", "faster_whisper", "torchaudio"]
+        any_major = any(os.path.exists(os.path.join(lib_dir, d)) for d in major_libs)
         
-        if has_torch and has_llama and has_whisper:
-            if log_callback: log_callback("Existing libraries found. Skipping wipe to save time/bandwidth.")
+        if any_major:
+            if log_callback: log_callback("Existing major libraries found. Switching to incremental update to save time.")
             # Run cleanup to ensure no duplicate metadata from previous bad runs
             clean_duplicates(lib_dir, log_callback)
             skip_wipe = True
@@ -1276,6 +1301,20 @@ def main():
     if "--uninstall" in sys.argv:
         uninstall_app()
         sys.exit(0)
+
+    # Single Instance Check
+    # We only block the app if we are not in 'repair' or 'setup' mode technically,
+    # but generally one instance of Privox is enough.
+    mutex_handle = is_app_running()
+    if not mutex_handle:
+        # If we are in run mode or already installed, just exit silently
+        # If we are in setup mode, maybe show a message
+        if "--run" in sys.argv or "--setup" not in sys.argv:
+            log_info("Another instance of Privox is already running. Exiting.")
+            sys.exit(0)
+        else:
+            messagebox.showinfo("Privox", "Another instance of Privox is already running.")
+            sys.exit(0)
 
     # Try to get install dir from registry if exists
     install_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', 'C:\\')), "Privox")

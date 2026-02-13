@@ -3,7 +3,7 @@
 A powerful, private, and local voice input assistant for Windows. Privox captures your speech, transcribes it using **Faster-Whisper**, and refines the text using **Llama 3** for perfect grammar and formatting.
 
 > [!WARNING]
-> **Disk Space Requirement**: This application requires approximately **4GB** of free disk space.
+> **Disk Space Requirement**: This application requires approximately **10GB** of free disk space.
 >
 > **Why so large?** Privox runs completely locally to ensure your privacy. This means it bundles:
 >
@@ -21,6 +21,7 @@ A powerful, private, and local voice input assistant for Windows. Privox capture
 - **VRAM Saver**: Dynamically unloads AI models from memory after 60 seconds of inactivity to free up resources for games and other apps.
 - **System Tray Integration**: Minimalist UI with quick access to settings and auto-launch configuration.
 - **Auto-Launch**: Option to start automatically with Windows.
+- **Smart Updates**: Only downloads what you need during updates, preserving heavy AI libraries to save bandwidth.
 
 ## Requirements
 
@@ -38,17 +39,21 @@ A powerful, private, and local voice input assistant for Windows. Privox capture
     cd Privox
     ```
 
-2.  **Install Dependencies:**
+2.  **Run the Setup & App:**
     ```bash
-    pip install -r requirements.txt
+    python src/bootstrap.py
     ```
-    _Ensure you have the correct CUDA-enabled version of PyTorch._
+    _This will automatically install dependencies and download the required AI models into your project folder. Alternatively, you can double-click `scripts/run.bat`._
 
 ## Usage
 
 ### Running from Source
 
 ```bash
+# Recommended: Automatic setup and launch
+python src/bootstrap.py
+
+# Advanced: Direct launch (requires manual dependency/model setup)
 python src/voice_input.py
 ```
 
@@ -100,18 +105,18 @@ If you want a smaller executable (removing NVIDIA drivers) for non-GPU machines:
 
 Privox uses a `config.json` file for customization. When running as an `.exe`, placed this file in the **same directory** as `Privox.exe`.
 
-| Parameter            | Default                 | Description                                                           |
-| :------------------- | :---------------------- | :-------------------------------------------------------------------- |
-| `hotkey`             | `"f8"`                  | Keys like `"f8"`, `"f10"`, or characters like `"space"`.              |
-| `sound_enabled`      | `true`                  | Enables/disables start and stop beeps.                                |
-| `vram_timeout`       | `60`                    | Seconds of inactivity before AI models are unloaded from VRAM.        |
-| `whisper_model`      | `"distil-large-v3"`     | Faster-Whisper model size.                                            |
-| `auto_stop_enabled`  | `true`                  | Automatically stop recording after silence.                           |
-| `silence_timeout_ms` | `10000`                 | Milliseconds of silence before auto-stop.                             |
-| `grammar_repo`       | (Llama 3.2)             | HuggingFace repository for the formatting model.                      |
-| `grammar_file`       | (GGUF)                  | Specific GGUF file to use.                                            |
-| `dictation_prompt`   | (Default System Prompt) | Custom system prompt. Use `{dict}` to insert custom dictionary hints. |
-| `custom_dictionary`  | `[...]`                 | List of words to help the AI recognize specific names/terms.          |
+| Parameter            | Default                 | Description                                                                          |
+| :------------------- | :---------------------- | :----------------------------------------------------------------------------------- |
+| `hotkey`             | `"f8"`                  | Single key (e.g., `"f8"`, `"space"`) or combinations (e.g., `"ctrl+1"`, `"alt+f8"`). |
+| `sound_enabled`      | `true`                  | Enables/disables start and stop beeps.                                               |
+| `vram_timeout`       | `60`                    | Seconds of inactivity before AI models are unloaded from VRAM.                       |
+| `whisper_model`      | `"distil-large-v3"`     | Faster-Whisper model size.                                                           |
+| `auto_stop_enabled`  | `true`                  | Automatically stop recording after silence.                                          |
+| `silence_timeout_ms` | `10000`                 | Milliseconds of silence before auto-stop.                                            |
+| `grammar_repo`       | (Llama 3.2)             | HuggingFace repository for the formatting model.                                     |
+| `grammar_file`       | (GGUF)                  | Specific GGUF file to use.                                                           |
+| `dictation_prompt`   | (Default System Prompt) | Custom system prompt. Use `{dict}` to insert custom dictionary hints.                |
+| `custom_dictionary`  | `[...]`                 | List of words to help the AI recognize specific names/terms.                         |
 
 > [!TIP]
 > **Customizing Behavior**: You can change `dictation_prompt` to make Privox behave differently (e.g., "Summarize this spoken text into a single sentence").

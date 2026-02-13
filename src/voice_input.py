@@ -10,6 +10,8 @@ import gc
 import concurrent.futures
 if sys.platform == 'win32':
     import winreg
+    import ctypes
+    from ctypes import wintypes
 
 # Disable Symlinks for Windows (Fixes WinError 1314)
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
@@ -436,6 +438,10 @@ class VoiceInputApp:
         self.model_lock = threading.Lock()
         self.vram_timeout = 60 # Seconds before unloading
         self.pending_wakeup = False # Auto-start recording after loading?
+        
+        # Multi-key hotkey support
+        self.pressed_keys = set()
+        self.target_hotkey_set = set() # Set of keys that must be pressed
 
         # Start loading threads
         threading.Thread(target=self.initial_load, daemon=True).start()
@@ -595,15 +601,33 @@ class VoiceInputApp:
                         if not os.path.exists(model_path):
                             log_print(f"WARNING: Configured model '{WHISPER_SIZE}' not found at {model_path}. Transcription may fail.")
                     
-                    hotkey_lookup = hotkey_str.lower()
-                    if hotkey_lookup in keyboard.Key.__members__:
-                        self.hotkey = keyboard.Key[hotkey_lookup]
-                    elif hotkey_str.upper() in keyboard.Key.__members__:
-                        self.hotkey = keyboard.Key[hotkey_str.upper()]
-                    else:
-                        self.hotkey = keyboard.KeyCode.from_char(hotkey_str)
+                    self.target_hotkey_set = set()
+                    parts = hotkey_str.split('+')
+                    for part in parts:
+                        part = part.strip().lower()
+                        if part in ['ctrl', 'control']:
+                            self.target_hotkey_set.add(keyboard.Key.ctrl_l)
+                        elif part == 'shift':
+                            self.target_hotkey_set.add(keyboard.Key.shift_l)
+                        elif part in ['alt', 'option']:
+                            self.target_hotkey_set.add(keyboard.Key.alt_l)
+                        elif part in ['cmd', 'command', 'win', 'super']:
+                            self.target_hotkey_set.add(keyboard.Key.cmd_l)
+                        elif part in keyboard.Key.__members__:
+                            self.target_hotkey_set.add(keyboard.Key[part])
+                        elif len(part) == 1:
+                            self.target_hotkey_set.add(keyboard.KeyCode.from_char(part))
+                        else:
+                            # Try uppercase members as well (for F8 etc if user types lowercase)
+                            if part.upper() in keyboard.Key.__members__:
+                                self.target_hotkey_set.add(keyboard.Key[part.upper()])
+                            else:
+                                log_print(f"Unknown key in hotkey: {part}")
                     
-                    log_print(f"Loaded Config - Hotkey: {self.hotkey}, Sound: {self.sound_enabled}, Timeout: {self.vram_timeout}s, Model: {WHISPER_SIZE}")
+                    if not self.target_hotkey_set:
+                        self.target_hotkey_set = {keyboard.Key.f8}
+                    
+                    log_print(f"Loaded Config - Hotkey: {hotkey_str} ({self.target_hotkey_set}), Sound: {self.sound_enabled}, Timeout: {self.vram_timeout}s, Model: {WHISPER_SIZE}")
             else:
                 log_print(f"config.json not found at {config_path}, using defaults")
         except Exception as e:
@@ -774,21 +798,34 @@ class VoiceInputApp:
             self.q.put(indata.copy())
 
     def on_press(self, key):
-        if key == self.hotkey:
+        # Normalize modifier keys (e.g. ctrl_r -> ctrl_l if that's what we store)
+        if key in [keyboard.Key.ctrl_r, keyboard.Key.ctrl_l]: key = keyboard.Key.ctrl_l
+        if key in [keyboard.Key.shift_r, keyboard.Key.shift_l]: key = keyboard.Key.shift_l
+        if key in [keyboard.Key.alt_gr, keyboard.Key.alt_l]: key = keyboard.Key.alt_l
+        if key in [keyboard.Key.cmd_r, keyboard.Key.cmd_l]: key = keyboard.Key.cmd_l
+
+        self.pressed_keys.add(key)
+        
+        # Check if ALL target keys are pressed
+        if self.target_hotkey_set.issubset(self.pressed_keys):
+            # To avoid repeated triggers while holding, we check if this was a fresh hit
+            # Actually, pynput often repeats events. We need to check if we already handled this "press"
+            # But for a voice toggle, once is enough.
+            
             # Wake up detection
             if not self.heavy_models_loaded:
                 log_print("Wake up detected. Pre-loading models...")
                 self.pending_wakeup = True # Auto-start recording when ready
                 threading.Thread(target=self.load_heavy_models, daemon=True).start()
-                return # Don't fall through to error message
+                return
 
             if not self.vad_model or self.asr_model is None:
-                log_print("Ignored F8: Models not fully loaded.")
+                log_print("Ignored Hotkey: Models not fully loaded.")
                 self.sound_manager.play_error()
                 return
 
             if not self.mic_active:
-                log_print("Ignored F8: No Microphone Active")
+                log_print("Ignored Hotkey: No Microphone Active")
                 self.sound_manager.play_error()
                 return
                 
@@ -796,6 +833,15 @@ class VoiceInputApp:
                 self.start_listening()
             else:
                 self.stop_listening()
+
+    def on_release(self, key):
+        if key in [keyboard.Key.ctrl_r, keyboard.Key.ctrl_l]: key = keyboard.Key.ctrl_l
+        if key in [keyboard.Key.shift_r, keyboard.Key.shift_l]: key = keyboard.Key.shift_l
+        if key in [keyboard.Key.alt_gr, keyboard.Key.alt_l]: key = keyboard.Key.alt_l
+        if key in [keyboard.Key.cmd_r, keyboard.Key.cmd_l]: key = keyboard.Key.cmd_l
+
+        if key in self.pressed_keys:
+            self.pressed_keys.remove(key)
 
     def start_listening(self):
         self.last_activity_time = time.time()
@@ -951,9 +997,6 @@ class VoiceInputApp:
             self.sound_manager.play_error()
 
     def processing_loop(self):
-        listener = keyboard.Listener(on_press=self.on_press)
-        listener.start()
-        
         self.start_audio_stream()
             
         while self.running:
@@ -1044,6 +1087,22 @@ class VoiceInputApp:
             return False
 
     def run(self):
+        # Single Instance Mutex Check (Windows)
+        self.mutex_handle = None
+        if sys.platform == 'win32':
+            mutex_name = "Global\\Privox_SingleInstance_Mutex"
+            self.mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+            last_error = ctypes.windll.kernel32.GetLastError()
+            
+            # ERROR_ALREADY_EXISTS = 183
+            if last_error == 183:
+                log_print("Another instance of Privox is already running. Exiting.")
+                if self.mutex_handle:
+                    ctypes.windll.kernel32.CloseHandle(self.mutex_handle)
+                sys.exit(0)
+            
+            log_print("Acquired single-instance mutex.")
+
         # Setup Tray Menu
         menu = pystray.Menu(
             pystray.MenuItem('Run at Startup', self.toggle_startup, checked=self.check_startup_status),
@@ -1063,6 +1122,10 @@ class VoiceInputApp:
         # Start Threads
         threading.Thread(target=self.processing_loop, daemon=True).start()
         threading.Thread(target=self.animation_loop, daemon=True).start()
+        
+        # Start Keyboard Listener
+        self.keyboard_listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
+        self.keyboard_listener.start()
         
         # Run Icon (Native Loop)
         self.icon.run()
