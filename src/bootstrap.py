@@ -757,15 +757,32 @@ def clean_duplicates(lib_dir, log_callback=None):
                     # Actually, if we removed 2.x and only 1.26 remains, we are good.
                     continue
 
-                # Surgical metadata cleanup (metadata only)
-                for ver, folder in versions:
-                    full_path = os.path.join(lib_dir, folder)
-                    if log_callback: log_callback(f"Removing redundant metadata: {folder}")
-                    try: shutil.rmtree(full_path, ignore_errors=True)
-                    except: pass
+                # Surgical metadata cleanup: Keep the LATEST version
+                # versions is a list of (version_str, folder_name)
+                try:
+                    # Simple alphanumeric sort is usually enough for .dist-info versions
+                    sorted_versions = sorted(versions, key=lambda x: x[0])
+                    to_remove = sorted_versions[:-1] # All but the last (latest)
+                    latest = sorted_versions[-1]
+                    
+                    if log_callback: log_callback(f"Keeping latest metadata: {latest[1]}")
+                    
+                    for ver, folder in to_remove:
+                        full_path = os.path.join(lib_dir, folder)
+                        if log_callback: log_callback(f"Removing redundant metadata: {folder}")
+                        try: shutil.rmtree(full_path, ignore_errors=True)
+                        except: pass
+                except Exception as e:
+                    if log_callback: log_callback(f"Sort warning: {e}. Falling back to safe cleanup.")
+                    # Fallback: if sort fails, we still don't want to delete ALL
+                    # Just delete all but the first one found
+                    for ver, folder in versions[1:]:
+                        full_path = os.path.join(lib_dir, folder)
+                        try: shutil.rmtree(full_path, ignore_errors=True)
+                        except: pass
                 
                 # We NO LONGER remove the package folder (candidate),
-                # as pip should be able to reconcile the state once the metadata is clean.
+                # as pip should be able to reconcile the state once the latest metadata is present.
                 # This prevents redundant full reinstalls of large library files.
 
     except Exception as e:
