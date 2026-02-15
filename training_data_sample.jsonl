@@ -1,0 +1,5 @@
+{"instruction": "執好呢句廣東話，保持口語感，唔好變書面語。", "input": "我今日好攰，想早啲訓。", "output": "我今日好攰呀，想早啲瞓。"}
+{"instruction": "修正呢句 Kongish 嘅 Grammar，唔好改佢啲中英文次序。", "input": "You yesterday go where? I find you long time.", "output": "你琴日去咗邊呀？我搵咗你好耐。"}
+{"instruction": "執靚呢句混雜廣東話嘅英文句子。", "input": "This project is very difficulty, we need more support.", "output": "呢個 project 好 difficulty，我地需要多啲 support。"}
+{"instruction": "修正標點同埋口語語法。", "input": "喂你食咗未呀我岩岩去左食譚仔。", "output": "喂，你食咗未呀？我啱啱去咗食譚仔。"}
+{"instruction": "處理 Kongish 客戶服務對話。", "input": "Sorry sir we are busy now, please wait a moment.", "output": "Sorry sir，我地而家好忙，請 wait a moment 呀。"}

@@ -28,6 +28,7 @@ ninja = "*"
 numpy = "<2.0.0" 
 pywin32 = "*"
 pyinstaller = "*"
+setuptools = "*"
 
 
 [pypi-dependencies]
@@ -38,5 +39,8 @@ pillow = "*"
 pyperclip = "*"
 huggingface_hub = "*"
 faster-whisper = "*"
+funasr = "*"
+modelscope = "*"
+scipy = "*"
 colorama = "*"
 requests = "*"

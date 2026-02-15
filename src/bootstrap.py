@@ -78,7 +78,10 @@ class InstallerGUI(tk.Tk):
         style.theme_use('vista' if sys.platform == 'win32' else 'clam')
         
         # Variables
-        default_path = os.path.join(os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', 'C:\\')), "Privox")
+        default_path = self.get_existing_install_path()
+        if not default_path:
+            default_path = os.path.join(os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', 'C:\\')), "Privox")
+        
         self.install_dir = tk.StringVar(value=default_path)
         self.active_process = None
         self.is_cancelling = False
@@ -105,6 +108,16 @@ class InstallerGUI(tk.Tk):
         
         self.create_pages()
         self.show_page("welcome")
+
+    def get_existing_install_path(self):
+        try:
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Privox"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                install_dir, _ = winreg.QueryValueEx(key, "InstallLocation")
+                if os.path.exists(install_dir):
+                    return os.path.normpath(install_dir)
+        except: pass
+        return None
 
     def create_pages(self):
         # --- Welcome Page ---
@@ -405,6 +418,9 @@ def install_app_files(target_dir, log_callback=None):
         
         # Copy Assets & Config
         config_path = os.path.join(EXE_DIR, "config.json")
+        if not os.path.exists(config_path) and getattr(sys, 'frozen', False):
+             config_path = os.path.join(sys._MEIPASS, "config.json")
+             
         if os.path.exists(config_path):
              shutil.copy2(config_path, os.path.join(target_dir, "config.json"))
 
@@ -598,35 +614,29 @@ def main():
             messagebox.showinfo("Privox", "Another instance of Privox is already running.")
             sys.exit(0)
 
-    # Determine Install Dir
-    install_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', 'C:\\')), "Privox")
+    # Determine if we are in an installed state
+    # Robust check: Are the local project files (Pixi, TOML) next to us?
+    exe_dir = os.path.dirname(os.path.normpath(sys.executable))
+    local_pixi = os.path.join(exe_dir, "_internal", "pixi", "pixi.exe")
+    local_toml = os.path.join(exe_dir, "pixi.toml")
     
-    # Check if we are running FROM the install dir
-    # Normalize paths
-    current_exe = os.path.normpath(sys.executable)
-    installed_exe = os.path.normpath(os.path.join(install_dir, "Privox.exe"))
-    
-    is_installed_location = (os.path.normcase(current_exe) == os.path.normcase(installed_exe))
+    is_installed = os.path.exists(local_pixi) and os.path.exists(local_toml)
 
-    if is_installed_location or "--run" in sys.argv:
+    if is_installed or "--run" in sys.argv:
         # Launch Main App via Pixi
-        pixi_exe = os.path.join(install_dir, "_internal", "pixi", "pixi.exe")
-        if os.path.exists(pixi_exe):
-            # Run via Pixi
-            log_info(f"Launching App via Pixi: {pixi_exe} run start")
-            # For debugging, we'll try to let it speak if it fails
-            subprocess.Popen([pixi_exe, "run", "start"], cwd=install_dir, creationflags=subprocess.CREATE_NO_WINDOW)
+        if os.path.exists(local_pixi):
+            log_info(f"Launching App via Pixi: {local_pixi} run start")
+            subprocess.Popen([local_pixi, "run", "start"], cwd=exe_dir, creationflags=subprocess.CREATE_NO_WINDOW)
             sys.exit(0)
         else:
-            # Installation damaged? Open GUI to repair.
-            app = InstallerGUI()
-            app.install_dir.set(install_dir) # Pre-set path
-            app.mainloop()
-            return
+            # Installation damaged or manual run flag used without install
+            # Default to GUI setup
+            pass
             
     # Installer Mode
     app = InstallerGUI()
     app.mainloop()
+            
 
 if __name__ == "__main__":
     main()

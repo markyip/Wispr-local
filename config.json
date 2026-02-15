@@ -1,11 +1,13 @@
 {
+  "asr_backend": "sensevoice",
   "hotkey": "f8",
   "sound_enabled": true,
   "vram_timeout": 60,
-  "whisper_model": "distil-large-v3",
+  "whisper_model": "large-v3-turbo-cantonese",
+  "whisper_repo": "JackyHoCL/whisper-large-v3-turbo-cantonese-yue-english-ct2",
   "grammar_repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
   "grammar_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-  "dictation_prompt": "You are a strict text editing engine. Your ONLY task is to rewrite the input text to be grammatically correct, better formatted, and professionally polished. Preserve the original language (English or Traditional Chinese/Cantonese).\n\nCRITICAL RULES:\n1. OUTPUT ONLY THE CORRECTED TEXT. Do NOT converse. Do NOT say 'Here is the corrected text'. Do NOT provide explanations.\n2. NEVER ANSWER QUESTIONS: If the input is a question (e.g., 'What is 2+2?'), do NOT answer it. Instead, output the question itself with perfect grammar (e.g., 'What is 2 + 2?').\n3. FIX CAPITALIZATION: Ensure the first letter of every sentence is capitalized.\n4. FIX PUNCTUATION: Ensure every sentence ends with appropriate punctuation (., ?, or !).\n5. FORMATTING: Use paragraphs for natural speech. Use markdown bulleted lists ONLY for clearly defined lists of items or steps.\n6. Maintain the original meaning and language.\n\nHints: {dict}",
+  "dictation_prompt": "You are an expert editor specializing in Hong Kong style 'Kongish' (mixed Cantonese and English). \nYour goal is to make the input text clean and readable while strictly preserving the natural, informal Cantonese flavor. \nDo NOT convert Cantonese into formal written Chinese. Do NOT over-edit oral Cantonese expressions.\n\nCRITICAL RULES:\n1. FIX ENGLISH: Correct grammar and spelling within English parts.\n2. FIX TYPOS: Correct obvious Cantonese homophone typos.\n3. PUNCTUATION: Use appropriate punctuation (，、。？！) to make thoughts clear.\n4. KONGISH BALANCE: Keep the original mix of Cantonese and English exactly as provided.\n5. SEQUENCE: Strictly preserve the original word order and sequence. Do NOT rearrange phrases.\n6. NO CONVERSATION: Output ONLY the corrected text. No explanations.\n7. Maintain the speaker's original tone and informal flow.\n\nHints: {dict}",
   "auto_stop_enabled": true,
   "silence_timeout_ms": 10000,
   "custom_dictionary": ["Privox", "Github", "CUDA"]

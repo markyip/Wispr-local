@@ -1,5 +1,11 @@
 import sys
 import os
+
+# --- 0. Hard Environment Isolation (MUST BE FIRST) ---
+os.environ["PYTHONNOUSERSITE"] = "1"
+import site
+site.ENABLE_USER_SITE = False
+
 import logging
 import threading
 import queue
@@ -16,7 +22,8 @@ if sys.platform == 'win32':
 def setup_logging():
     # Determine BASE_DIR early
     if getattr(sys, 'frozen', False):
-        base_dir = os.path.join(os.environ["LOCALAPPDATA"], "Privox")
+        # We want the log to be in the same folder as the app for portability/custom paths
+        base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
@@ -58,6 +65,9 @@ def setup_logging():
 logging.getLogger("PIL").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+
+# Initialize logging IMMEDIATELY to catch import errors
+setup_logging()
 
 def log_print(msg, **kwargs):
     # Only print to stdout. sys.stdout is already redirected to logging.info
@@ -104,7 +114,8 @@ except Exception as e:
 
 # Base Directory for models/libs
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.join(os.environ["LOCALAPPDATA"], "Privox")
+    # For custom install paths, we use the EXE directory
+    BASE_DIR = os.path.dirname(os.path.normpath(sys.executable))
 else:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -138,6 +149,9 @@ try:
     log_print(f"Python Version: {sys.version}")
     log_print(f"Torch Version: {torch.__version__}")
     log_print(f"Torch Path: {getattr(torch, '__file__', 'Unknown')}")
+    log_print("Importing Llama components...")
+    from llama_cpp import Llama
+    log_print("Llama import successful.")
     log_print(f"CUDA Available: {torch.cuda.is_available()}")
     log_print(f"CUDA Version: {torch.version.cuda}")
     log_print(f"CuDNN Version: {torch.backends.cudnn.version()}")
@@ -183,8 +197,9 @@ SPEECH_PAD_MS = 500
 
 # Models
 # Models
-WHISPER_SIZE = "distil-large-v3" # Balanced (Multilingual)
-WHISPER_REPO = "Systran/faster-distil-whisper-large-v3"
+WHISPER_SIZE = "large-v3-turbo-cantonese" # Optimized for Hong Kong Code-switching
+WHISPER_REPO = "JackyHoCL/whisper-large-v3-turbo-cantonese-yue-english-ct2"
+ASR_BACKEND = "whisper" # Default: whisper or sensevoice
 
 # Llama 3.2 3B Instruct
 GRAMMAR_REPO = "bartowski/Llama-3.2-3B-Instruct-GGUF"
@@ -327,15 +342,17 @@ class GrammarChecker:
                     system_prompt = self.dictation_prompt.replace("{dict}", dict_prompt)
                 else:
                     system_prompt = (
-                        "You are a strict text editing engine. Your ONLY task is to rewrite the input text to be grammatically correct, better formatted, and professionally polished. "
-                        "Preserve the original language (English or Traditional Chinese/Cantonese)."
+                        "You are an expert editor specializing in Hong Kong style 'Kongish' (mixed Cantonese and English). "
+                        "Your goal is to make the input text clean and readable while strictly preserving the natural, informal Cantonese flavor. "
+                        "Do NOT convert Cantonese into formal written Chinese. Do NOT over-edit oral Cantonese expressions."
                         "\n\nCRITICAL RULES:"
-                        "\n1. OUTPUT ONLY THE CORRECTED TEXT. Do NOT converse. Do NOT say 'Here is the corrected text'. Do NOT provide explanations."
-                        "\n2. NEVER ANSWER QUESTIONS: If the input is a question (e.g., 'What is 2+2?'), do NOT answer it. Instead, output the question itself with perfect grammar (e.g., 'What is 2 + 2?')."
-                        "\n3. FIX CAPITALIZATION: Ensure the first letter of every sentence is capitalized."
-                        "\n4. FIX PUNCTUATION: Ensure every sentence ends with appropriate punctuation (., ?, or !)."
-                        "\n5. FORMATTING: Use paragraphs for natural speech. Use markdown bulleted lists ONLY for clearly defined lists of items or steps."
-                        "\n6. Maintain the original meaning and language."
+                        "\n1. FIX ENGLISH: Correct grammar and spelling within English parts."
+                        "\n2. FIX TYPOS: Correct obvious Cantonese homophone typos."
+                        "\n3. PUNCTUATION: Use appropriate punctuation (，、。？！) to make thoughts clear."
+                        "\n4. KONGISH BALANCE: Keep the original mix of Cantonese and English exactly as provided."
+                        "\n5. SEQUENCE: Strictly preserve the original word order and sequence. Do NOT rearrange phrases."
+                        "\n6. NO CONVERSATION: Output ONLY the corrected text. No explanations."
+                        "\n7. Maintain the speaker's original tone and informal flow."
                         f"{dict_prompt}"
                     )
                 user_content = f"Input Text: {text}\n\nCorrected Text:"
@@ -477,18 +494,27 @@ class VoiceInputApp:
 
             def load_asr():
                 try:
-                    # 1. Path Diagnostics
-                    local_whisper = os.path.join(BASE_DIR, "models", f"whisper-{WHISPER_SIZE}")
                     is_gpu = torch.cuda.is_available()
                     device_str = "cuda" if is_gpu else "cpu"
-                    compute_type = "float16" if is_gpu else "int8"
                     
-                    from faster_whisper import WhisperModel
-                    model_path = local_whisper if os.path.exists(os.path.join(local_whisper, "model.bin")) else WHISPER_REPO
-                    
-                    log_print(f"ASR Diagnostic - Initializing WhisperModel ({WHISPER_SIZE}) on {device_str}...")
-                    self.asr_model = WhisperModel(model_path, device=device_str, compute_type=compute_type)
-                    log_print(f"WhisperModel initialized successfully.")
+                    if ASR_BACKEND == "sensevoice":
+                        sense_dir = os.path.join(BASE_DIR, "models", "SenseVoiceSmall")
+                        log_print(f"ASR Diagnostic - Initializing SenseVoiceSmall on {device_str}...")
+                        from funasr import AutoModel
+                        self.asr_model = AutoModel(
+                            model=sense_dir if os.path.exists(sense_dir) else "iic/SenseVoiceSmall",
+                            device=device_str,
+                            disable_update=True
+                        )
+                        log_print(f"SenseVoice initialized successfully.")
+                    else:
+                        compute_type = "float16" if is_gpu else "int8"
+                        from faster_whisper import WhisperModel
+                        local_whisper = os.path.join(BASE_DIR, "models", f"whisper-{WHISPER_SIZE}")
+                        model_path = local_whisper if os.path.exists(os.path.join(local_whisper, "model.bin")) else WHISPER_REPO
+                        log_print(f"ASR Diagnostic - Initializing WhisperModel ({WHISPER_SIZE}) on {device_str}...")
+                        self.asr_model = WhisperModel(model_path, device=device_str, compute_type=compute_type)
+                        log_print(f"WhisperModel initialized successfully.")
                     return True
                 except Exception as e:
                     log_print(f"Parallel Load Error (ASR): {e}")
@@ -569,12 +595,13 @@ class VoiceInputApp:
                     
                     # Model overrides
                     # Model overrides
-                    global WHISPER_SIZE, WHISPER_REPO, GRAMMAR_REPO, GRAMMAR_FILE
+                    global WHISPER_SIZE, WHISPER_REPO, GRAMMAR_REPO, GRAMMAR_FILE, ASR_BACKEND
                     old_whisper = WHISPER_SIZE
                     WHISPER_SIZE = config.get("whisper_model", WHISPER_SIZE)
                     WHISPER_REPO = config.get("whisper_repo", WHISPER_REPO)
                     GRAMMAR_REPO = config.get("grammar_repo", GRAMMAR_REPO)
                     GRAMMAR_FILE = config.get("grammar_file", GRAMMAR_FILE)
+                    ASR_BACKEND = config.get("asr_backend", "whisper")
                     
                     # Verify model folder exists if overridden
                     if WHISPER_SIZE != old_whisper:
@@ -594,7 +621,7 @@ class VoiceInputApp:
                         else:
                             log_print(f"Unknown hotkey: {hotkey_str}. Using F8.")
                     
-                    log_print(f"Loaded Config - Hotkey: {hotkey_str}, Sound: {self.sound_enabled}, Timeout: {self.vram_timeout}s, Model: {WHISPER_SIZE}")
+                    log_print(f"Loaded Config - Hotkey: {hotkey_str}, Sound: {self.sound_enabled}, Timeout: {self.vram_timeout}s, Model: {WHISPER_SIZE}, Backend: {ASR_BACKEND}")
             else:
                 log_print(f"config.json not found at {config_path}, using defaults")
         except Exception as e:
@@ -846,27 +873,49 @@ class VoiceInputApp:
                      self.update_status("READY")
                      return
 
-            log_print(f" Transcribing Using Model: {WHISPER_SIZE}...", flush=True)
+            log_print(f" Transcribing Using Backend: {ASR_BACKEND} (Model: {WHISPER_SIZE if ASR_BACKEND == 'whisper' else 'SenseVoiceSmall'})...", flush=True)
             t0 = time.time()
             
-            # Faster-Whisper
-            segments, info = self.asr_model.transcribe(
-                audio_data.astype(np.float32), 
-                beam_size=5,
-                language=None, # Auto-detect
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
-            
-            log_print(f" ASR Result - Language Detected: {info.language} ({info.language_probability:.2f})")
-            
-            # Collect segments and log each one
-            results = []
-            for segment in segments:
-                log_print(f"  Segment: [{segment.start:.2f}s -> {segment.end:.2f}s] '{segment.text}'")
-                results.append(segment.text)
-            
-            raw_text = " ".join(results).strip()
+            raw_text = ""
+            if ASR_BACKEND == "sensevoice":
+                # SenseVoice/funasr
+                results = self.asr_model.generate(
+                    input=audio_data.astype(np.float32),
+                    cache={},
+                    language="auto", # SenseVoice handles LID well
+                    use_itn=True,
+                    batch_size_s=60,
+                    merge_vad=True,
+                    merge_length_s=15,
+                )
+                
+                # funasr output is a list of dicts: [{'text': '...', 'key': '...'}]
+                if results and len(results) > 0:
+                    raw_text = results[0].get('text', '')
+                    # Clean up emotion/event tags like <|HAPPY|>, <|ENTHUSIASTIC|>, etc.
+                    raw_text = re.sub(r'<\|.*?\|>', '', raw_text).strip()
+                
+                log_print(f" SenseVoice Result - Raw: '{raw_text}'")
+            else:
+                # Faster-Whisper
+                segments, info = self.asr_model.transcribe(
+                    audio_data.astype(np.float32), 
+                    beam_size=5,
+                    language="yue", # Force Cantonese + English support
+                    initial_prompt="這是一段廣東話同英文混合嘅錄音。It contains Cantonese and English mixed together.",
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+                
+                log_print(f" ASR Result - Language Detected: {info.language} ({info.language_probability:.2f})")
+                
+                # Collect segments and log each one
+                seg_results = []
+                for segment in segments:
+                    log_print(f"  Segment: [{segment.start:.2f}s -> {segment.end:.2f}s] '{segment.text}'")
+                    seg_results.append(segment.text)
+                
+                raw_text = " ".join(seg_results).strip()
             
             t1 = time.time()
             log_print(f" [ASR Total Time: {t1 - t0:.3f}s] Joined Result: '{raw_text}'")
@@ -1081,13 +1130,6 @@ class VoiceInputApp:
 
 if __name__ == "__main__":
     try:
-        # 1. Environment Isolation
-        os.environ["PYTHONNOUSERSITE"] = "1"
-        import site
-        site.ENABLE_USER_SITE = False
-        
-        setup_logging()
-        
         # 3. Early GPU Check
         import torch
         gpu_detected = torch.cuda.is_available()

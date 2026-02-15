@@ -6,12 +6,55 @@ def log(msg):
     print(f"[ModelSetup] {msg}", flush=True)
 
 def main():
+    # 0. Environment Isolation
+    os.environ["PYTHONNOUSERSITE"] = "1"
+    import site
+    site.ENABLE_USER_SITE = False
+    
     target_base_dir = os.getcwd()
+    
+    # Load settings from config.json if it exists
+    whisper_model_name = "large-v3-turbo-cantonese" 
+    whisper_repo = "JackyHoCL/whisper-large-v3-turbo-cantonese-yue-english-ct2"
+    grammar_file = "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+    grammar_repo = "bartowski/Llama-3.2-3B-Instruct-GGUF"
+    
+    config_path = os.path.join(target_base_dir, "config.json")
+    if os.path.exists(config_path):
+        try:
+            import json
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                whisper_model_name = config.get("whisper_model", whisper_model_name)
+                whisper_repo = config.get("whisper_repo", whisper_repo)
+                grammar_file = config.get("grammar_file", grammar_file)
+                grammar_repo = config.get("grammar_repo", grammar_repo)
+                asr_backend = config.get("asr_backend", "whisper")
+            log(f"Loaded tailored settings from config.json: {whisper_model_name}")
+        except Exception as e:
+            log(f"Config load error (using defaults): {e}")
+            asr_backend = "whisper"
+
     models_dir = os.path.join(target_base_dir, "models")
     if not os.path.exists(models_dir):
         os.makedirs(models_dir)
         
-    log("Checking AI Models...")
+    log(f"Checking AI Models (Backend: {asr_backend})...")
+
+    # 0. SenseVoiceSmall (Alternative)
+    if asr_backend == "sensevoice":
+        sense_dir = os.path.join(models_dir, "SenseVoiceSmall")
+        if not os.path.exists(sense_dir):
+            log("Downloading SenseVoiceSmall from ModelScope...")
+            try:
+                from modelscope.hub.snapshot_download import snapshot_download
+                snapshot_download('iic/SenseVoiceSmall', local_dir=sense_dir)
+            except ImportError:
+                log("modelscope not installed. Using huggingface fallback...")
+                from huggingface_hub import snapshot_download
+                snapshot_download(repo_id='iic/SenseVoiceSmall', local_dir=sense_dir)
+        else:
+            log("SenseVoiceSmall model present.")
 
     # 0. Install Llama-cpp-python with CUDA support
     llama_stable = False
@@ -64,8 +107,6 @@ def main():
         sys.exit(1)
 
     # 1. Grammar Model (Llama)
-    grammar_file = "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-    grammar_repo = "bartowski/Llama-3.2-3B-Instruct-GGUF"
     if not os.path.exists(os.path.join(models_dir, grammar_file)):
         log(f"Downloading Grammar Model ({grammar_file})...")
         hf_hub_download(repo_id=grammar_repo, filename=grammar_file, local_dir=models_dir)
@@ -73,8 +114,6 @@ def main():
         log(f"Grammar Model {grammar_file} present.")
 
     # 2. Whisper Model (Faster-Whisper Format)
-    whisper_model_name = "distil-large-v3"
-    whisper_repo = "Systran/faster-distil-whisper-large-v3"
     whisper_target = os.path.join(models_dir, "whisper-" + whisper_model_name)
     
     # Check for repo-specific tag to force redownload if we switched repos
